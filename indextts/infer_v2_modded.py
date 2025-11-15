@@ -1,9 +1,6 @@
 import os
 from subprocess import CalledProcessError
-<<<<<<< HEAD
-=======
 from typing import Optional
->>>>>>> myfork/training_v2
 
 os.environ['HF_HUB_CACHE'] = './checkpoints/hf_cache'
 import json
@@ -23,10 +20,6 @@ from omegaconf import OmegaConf
 
 from indextts.gpt.model_v2 import UnifiedVoice
 from indextts.utils.maskgct_utils import build_semantic_model, build_semantic_codec
-<<<<<<< HEAD
-from indextts.utils.checkpoint import load_checkpoint
-=======
->>>>>>> myfork/training_v2
 from indextts.utils.front import TextNormalizer, TextTokenizer
 
 from indextts.s2mel.modules.commons import load_checkpoint2, MyModel
@@ -43,11 +36,6 @@ import random
 import torch.nn.functional as F
 
 class IndexTTS2:
-<<<<<<< HEAD
-    def __init__(
-            self, cfg_path="checkpoints/config.yaml", model_dir="checkpoints", is_fp16=False, device=None,
-            use_cuda_kernel=None,
-=======
     @staticmethod
     def _load_gpt_state_dict(path: str) -> dict:
         checkpoint = torch.load(path, map_location="cpu")
@@ -125,26 +113,11 @@ class IndexTTS2:
             use_torch_compile: bool = False,
             gpt_checkpoint_path: Optional[str] = None,
             bpe_model_path: Optional[str] = None,
->>>>>>> myfork/training_v2
     ):
         """
         Args:
             cfg_path (str): path to the config file.
             model_dir (str): path to the model directory.
-<<<<<<< HEAD
-            is_fp16 (bool): whether to use fp16.
-            device (str): device to use (e.g., 'cuda:0', 'cpu'). If None, it will be set automatically based on the availability of CUDA or MPS.
-            use_cuda_kernel (None | bool): whether to use BigVGan custom fused activation CUDA kernel, only for CUDA device.
-        """
-        if device is not None:
-            self.device = device
-            self.is_fp16 = False if device == "cpu" else is_fp16
-            self.use_cuda_kernel = use_cuda_kernel is not None and use_cuda_kernel and device.startswith("cuda")
-        elif torch.cuda.is_available():
-            self.device = "cuda:0"
-            self.is_fp16 = is_fp16
-            self.use_cuda_kernel = use_cuda_kernel is None or use_cuda_kernel
-=======
             is_fp16 (bool): legacy alias for `use_fp16`.
             use_fp16 (Optional[bool]): whether to run GPT in fp16 when the device supports it.
             device (str): device to use (e.g., 'cuda:0', 'cpu'). If None, it will be set automatically based on the availability of CUDA/MPS/XPU.
@@ -166,7 +139,6 @@ class IndexTTS2:
             self.device = "xpu"
             self.is_fp16 = bool(fp16_requested)
             self.use_cuda_kernel = False
->>>>>>> myfork/training_v2
         elif hasattr(torch, "mps") and torch.backends.mps.is_available():
             self.device = "mps"
             self.is_fp16 = False  # Use float16 on MPS is overhead than float32
@@ -181,14 +153,6 @@ class IndexTTS2:
         self.model_dir = model_dir
         self.dtype = torch.float16 if self.is_fp16 else None
         self.stop_mel_token = self.cfg.gpt.stop_mel_token
-<<<<<<< HEAD
-
-        self.qwen_emo = QwenEmotion(os.path.join(self.model_dir, self.cfg.qwen_emo_path))
-
-        self.gpt = UnifiedVoice(**self.cfg.gpt)
-        self.gpt_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
-        load_checkpoint(self.gpt, self.gpt_path)
-=======
         self.use_accel = use_accel
         self.use_torch_compile = use_torch_compile
 
@@ -217,7 +181,6 @@ class IndexTTS2:
 
         self.gpt = UnifiedVoice(**self.cfg.gpt, use_accel=self.use_accel)
         self._load_gpt_weights(self.gpt, gpt_state)
->>>>>>> myfork/training_v2
         self.gpt = self.gpt.to(self.device)
         if self.is_fp16:
             self.gpt.eval().half()
@@ -225,14 +188,10 @@ class IndexTTS2:
             self.gpt.eval()
         print(">> GPT weights restored from:", self.gpt_path)
 
-<<<<<<< HEAD
-        use_deepspeed = os.environ.get("INDEXTTS_USE_DEEPSPEED", "1") != "0"
-=======
         if use_deepspeed is None:
             use_deepspeed = os.environ.get("INDEXTTS_USE_DEEPSPEED", "1") != "0"
         else:
             os.environ["INDEXTTS_USE_DEEPSPEED"] = "1" if use_deepspeed else "0"
->>>>>>> myfork/training_v2
         if use_deepspeed:
             try:
                 import deepspeed
@@ -282,13 +241,10 @@ class IndexTTS2:
         )
         self.s2mel = s2mel.to(self.device)
         self.s2mel.models['cfm'].estimator.setup_caches(max_batch_size=1, max_seq_length=8192)
-<<<<<<< HEAD
-=======
         if self.use_torch_compile:
             print(">> Enabling torch.compile optimization")
             self.s2mel.enable_torch_compile()
             print(">> torch.compile optimization enabled successfully")
->>>>>>> myfork/training_v2
         self.s2mel.eval()
         print(">> s2mel weights restored from:", s2mel_path)
 
@@ -309,16 +265,12 @@ class IndexTTS2:
         self.bigvgan.eval()
         print(">> bigvgan weights restored from:", bigvgan_name)
 
-<<<<<<< HEAD
-        self.bpe_path = os.path.join(self.model_dir, self.cfg.dataset["bpe_model"])
-=======
         if bpe_model_path is not None:
             self.bpe_path = os.path.abspath(bpe_model_path)
         else:
             self.bpe_path = os.path.join(self.model_dir, self.cfg.dataset["bpe_model"])
         if not os.path.isfile(self.bpe_path):
             raise FileNotFoundError(f"BPE tokenizer not found: {self.bpe_path}")
->>>>>>> myfork/training_v2
         self.normalizer = TextNormalizer()
         self.normalizer.load()
         print(">> TextNormalizer loaded")
@@ -460,10 +412,7 @@ class IndexTTS2:
               emo_audio_prompt=None, emo_alpha=1.0,
               emo_vector=None,
               use_emo_text=False, emo_text=None, use_random=False, interval_silence=200,
-<<<<<<< HEAD
-=======
               duration_seconds=None,
->>>>>>> myfork/training_v2
               verbose=False, max_text_tokens_per_sentence=120, **generation_kwargs):
         print(">> start inference...")
         self._set_gr_progress(0, "start inference...")
@@ -590,9 +539,6 @@ class IndexTTS2:
         bigvgan_time = 0
         progress = 0
         has_warned = False
-<<<<<<< HEAD
-        for sent in sentences:
-=======
         duration_plan = None
         target_duration_tokens = None
         if duration_seconds is not None:
@@ -616,7 +562,6 @@ class IndexTTS2:
                 duration_plan = [min(t, max_len - 1) for t in duration_plan]
 
         for idx_sent, sent in enumerate(sentences):
->>>>>>> myfork/training_v2
             text_tokens = self.tokenizer.convert_tokens_to_ids(sent)
             text_tokens = torch.tensor(text_tokens, dtype=torch.int32, device=self.device).unsqueeze(0)
             if verbose:
@@ -641,12 +586,9 @@ class IndexTTS2:
                         emovec = emovec_mat + (1 - torch.sum(weight_vector)) * emovec
                         # emovec = emovec_mat
 
-<<<<<<< HEAD
-=======
                     sentence_duration_tokens = None
                     if duration_plan:
                         sentence_duration_tokens = duration_plan[min(idx_sent, len(duration_plan) - 1)]
->>>>>>> myfork/training_v2
                     codes, speech_conditioning_latent = self.gpt.inference_speech(
                         spk_cond_emb,
                         text_tokens,
@@ -663,10 +605,7 @@ class IndexTTS2:
                         num_beams=num_beams,
                         repetition_penalty=repetition_penalty,
                         max_generate_length=max_mel_tokens,
-<<<<<<< HEAD
-=======
                         target_duration_tokens=sentence_duration_tokens,
->>>>>>> myfork/training_v2
                         **generation_kwargs
                     )
 
@@ -731,19 +670,6 @@ class IndexTTS2:
                     S_infer = S_infer + latent
                     target_lengths = (code_lens * 1.72).long()
 
-<<<<<<< HEAD
-                    cond = self.s2mel.models['length_regulator'](S_infer,
-                                                                 ylens=target_lengths,
-                                                                 n_quantizers=3,
-                                                                 f0=None)[0]
-                    cat_condition = torch.cat([prompt_condition, cond], dim=1)
-                    vc_target = self.s2mel.models['cfm'].inference(cat_condition,
-                                                                   torch.LongTensor([cat_condition.size(1)]).to(
-                                                                       cond.device),
-                                                                   ref_mel, style, None, diffusion_steps,
-                                                                   inference_cfg_rate=inference_cfg_rate)
-                    vc_target = vc_target[:, :, ref_mel.size(-1):]
-=======
                     cond = self.s2mel.models['length_regulator'](
                         S_infer,
                         ylens=target_lengths,
@@ -807,7 +733,6 @@ class IndexTTS2:
                         inference_cfg_rate=inference_cfg_rate,
                     )
                     vc_target = vc_target[:, :, ref_mel_batch.size(-1):]
->>>>>>> myfork/training_v2
                     s2mel_time += time.perf_counter() - m_start_time
 
                     m_start_time = time.perf_counter()

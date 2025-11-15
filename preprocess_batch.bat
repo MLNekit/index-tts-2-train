@@ -1,10 +1,10 @@
 uv run python tools/preprocess_multiproc.py `
-    --manifest datasets/FR_yodas_dataset/fr_yodas_train.jsonl `
-    --output-dir fr_processed_data `
-    --tokenizer checkpoints/bpe_multilingual.model `
+    --manifest datasets/italian_emilia_dataset/italian_transcribed.jsonl `
+    --output-dir italian_processed_data `
+    --tokenizer checkpoints/italian_bpe.model `
     --config checkpoints/config_finetune.yaml `
-    --gpt-checkpoint checkpoints/gpt_original.pth `
-    --language fr `
+    --gpt-checkpoint checkpoints/gpt.pth `
+    --language it `
     --device cuda `
     --batch-size 1 `
     --workers 1 `
