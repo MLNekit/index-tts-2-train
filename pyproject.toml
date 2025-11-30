@@ -34,7 +34,7 @@ dependencies = [
   "descript-audiotools==0.7.2",
   "einops>=0.8.1",
   "ffmpeg-python==0.2.0",
-  "flash-attn",
+#  "flash-attn",
   "g2p-en==2.1.0",
   "gradio>=5.45.0",
   "jieba==0.42.1",
@@ -78,7 +78,6 @@ cu128 = [
   "torch>=2.7.1",
   "torchvision>=0.22.1",
   "torchaudio>=2.7.1",
-  "flash-attn"
 ]
 
 
@@ -105,9 +104,6 @@ build-backend = "hatchling.build"
 # saves time, since it won't waste time downloading a generic PyTorch version.
 no-build-isolation-package = ["deepspeed"]
 
-[tool.uv.extra-build-dependencies]
-flash-attn = ["torch"]
-
 [tool.uv.sources]
 # Install PyTorch with CUDA support on Linux/Windows (CUDA doesn't exist for Mac).
 # NOTE: We must explicitly request them as `dependencies` above. These improved
@@ -121,11 +117,10 @@ torchaudio = [
 torchvision = [
   { index = "pytorch-cuda", marker = "sys_platform == 'linux' or sys_platform == 'win32'", extra = "cu128" },
 ]
-flash-attn = [
-    { index = "pytorch-cuda", marker = "sys_platform == 'linux'", extra = "cu128" },
-    { path = "flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp310-cp310-win_amd64.whl", marker = "sys_platform == 'win32'" }
-    
-]
+#flash-attn = [
+#    { index = "pytorch-cuda", marker = "sys_platform == 'linux'", extra = "cu128" },
+#    { path = "flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp310-cp310-win_amd64.whl", marker = "sys_platform == 'win32'" }   
+#]
 
 [[tool.uv.index]]
 name = "pytorch-cuda"
