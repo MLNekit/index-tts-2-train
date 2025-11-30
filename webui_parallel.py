@@ -295,7 +295,7 @@ def build_primary_tts() -> IndexTTS2:
         cfg_path=os.path.join(cmd_args.model_dir, "config.yaml"),
         is_fp16=cmd_args.is_fp16,
         use_cuda_kernel=False,
-        use_accel=True,
+        use_accel=False,
         gpt_checkpoint_path=_MODEL_SELECTION["gpt"],
         bpe_model_path=_MODEL_SELECTION["bpe"],
     )
@@ -493,7 +493,7 @@ def _worker_loop(job_queue: mp.Queue, result_queue: mp.Queue, config: Dict[str, 
             cfg_path=os.path.join(config["model_dir"], "config.yaml"),
             is_fp16=config.get("is_fp16", False),
             use_cuda_kernel=False,
-            use_accel=True,
+            use_accel=False,
             gpt_checkpoint_path=gpt_override,
             bpe_model_path=bpe_override,
         )
