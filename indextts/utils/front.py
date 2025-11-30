@@ -5,6 +5,14 @@ import re
 import unicodedata
 from typing import List, Union, overload
 import warnings
+try:
+    from num2words import num2words
+except ImportError:
+    warnings.warn("num2words is not installed. Russian number normalization will not work.", ImportWarning)
+    # Заглушка, если num2words не установлен
+    def num2words(num, lang, to):
+        return str(num)
+
 from indextts.utils.common import tokenize_by_CJK_char, de_tokenized_by_CJK_char
 from sentencepiece import SentencePieceProcessor
 
@@ -13,6 +21,23 @@ class TextNormalizer:
     _HIRAGANA_PATTERN = re.compile(r"[\u3040-\u309f]")
     _KATAKANA_PATTERN = re.compile(r"[\u30a0-\u30ff\u31f0-\u31ff\uFF66-\uFF9F]")
     _JAPANESE_PUNCT = re.compile(r"[ー〜〝〞〟・]")
+    _CYRILLIC_PATTERN = re.compile(r'[а-яА-ЯёЁ]')
+    
+    # Регулярные выражения для улучшения русской нормализации (добавлены/изменены)
+    # 1. Стандартизация всех форм тире/дефисов в ' - '
+    _ru_re_dashes = re.compile(r'[\u2013\u2014—–-]\s*')
+    
+    # 2. Стандартизация многоточия в ' ... '
+    _re_ellipsis_1 = re.compile(r'\.\s*\.\s*\.')
+    _re_ellipsis_2 = re.compile(r'\.{2,}')
+    _re_ellipsis_3 = re.compile(r'…')
+    
+    # 3. Обеспечение пробела перед критической пунктуацией (.,?!:;) для токенов типа ' ?'
+    _ru_re_punctuation_spacing = re.compile(r'\s*([.,?!:;])\s*')
+    
+    # 4. Удаление избыточных знаков препинания (!!! -> !, ??? -> ?)
+    _re_multi_punct = re.compile(r'([?!])\1+')
+
 
     def __init__(self, preferred_language: str | None = None):
         self.zh_normalizer = None
@@ -29,7 +54,8 @@ class TextNormalizer:
             "\n": " ",
             "·": "-",
             "、": ",",
-            "...": "…",
+            # Многоточие будет обрабатываться через regex _re_ellipsis_N
+            "...": "…", 
             ",,,": "…",
             "，，，": "…",
             "……": "…",
@@ -48,7 +74,7 @@ class TextNormalizer:
             "】": "'",
             "[": "'",
             "]": "'",
-            "—": "-",
+            "—": "-", # Будет переопределено в ru_char_rep_map, но оставлено для базовой чистки
             "～": "-",
             "~": "-",
             "「": "'",
@@ -62,9 +88,41 @@ class TextNormalizer:
         self.jp_char_rep_map = {
             **self.char_rep_map,
         }
+        # Для русского языка используем regex для точной настройки пробелов,
+        # поэтому здесь оставляем только замену широких символов на узкие, 
+        # но основные знаки пунктуации удаляем, чтобы их обработал _ru_re_punctuation_spacing
+        self.ru_char_rep_map = {
+            "：": ",",
+            "；": ",",
+            "，": ",",
+            "！": "!",
+            "？": "?",
+            "“": "'",
+            "”": "'",
+            "‘": "'",
+            "’": "'",
+            "（": "'",
+            "）": "'",
+            "《": "'",
+            "》": "'",
+            "【": "'",
+            "】": "'",
+            "「": "'",
+            "」": "'",
+            "~": "-",
+            "～": "-",
+            "\n": " ",
+            "·": "-",
+            # Убираем стандартное тире из карты, чтобы его обработал _ru_re_dashes regex
+            #"—": "-", 
+            # ... остальные символы, которые не конфликтуют с regex для пробелов
+        }
+
         self._base_cleanup_pattern = re.compile("|".join(re.escape(p) for p in self.char_rep_map.keys()))
         self._zh_cleanup_pattern = re.compile("|".join(re.escape(p) for p in self.zh_char_rep_map.keys()))
         self._jp_cleanup_pattern = re.compile("|".join(re.escape(p) for p in self.jp_char_rep_map.keys()))
+        # Создаем карту только для символов, которые НЕ обрабатываются через _ru_re_punctuation_spacing
+        self._ru_cleanup_pattern = re.compile("|".join(re.escape(p) for p in self.ru_char_rep_map.keys()))
 
     def match_email(self, email):
         # 正则表达式匹配邮箱格式：数字英文@数字英文.英文
@@ -96,6 +154,13 @@ class TextNormalizer:
 
         has_pinyin = bool(re.search(TextNormalizer.PINYIN_TONE_PATTERN, s, re.IGNORECASE))
         return has_pinyin
+    
+    def is_russian(self, text: str) -> bool:
+        """Проверяет, содержит ли текст символы кириллицы (русский)."""
+        if self._CYRILLIC_PATTERN.search(text):
+            # Простая проверка на наличие кириллицы.
+            return True
+        return False
 
     def load(self):
         # print(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -155,6 +220,62 @@ class TextNormalizer:
         text = self._jp_cleanup_pattern.sub(lambda x: self.jp_char_rep_map[x.group()], text)
         return text.strip()
 
+    def normalize_russian(self, text: str) -> str:
+        text = text.strip()
+        if not text:
+            return ""
+        
+        # 1. Приведение к нижнему регистру и очистка Unicode
+        text = unicodedata.normalize("NFKC", text)
+        text = text.lower()
+        
+        # 2. Обработка сокращений (можно расширить)
+        text = text.replace('г.', 'году')
+        text = text.replace('тыс.', 'тысяч')
+        text = text.replace('руб.', 'рублей')
+        text = text.replace('ул.', 'улица')
+        text = text.replace('д.', 'дом')
+        
+        # 3. Нормализация чисел с num2words (важно для TTS)
+        def replace_num(match):
+            num_str = match.group(0)
+            # Пробуем целые числа
+            try:
+                # num2words имеет проблемы с русским языком (не всегда склоняет правильно),
+                # но для базовой нормализации чисел это лучший вариант.
+                return num2words(int(num_str), lang='ru', to='cardinal')
+            except ValueError:
+                return num_str
+        
+        # Замена чисел, которые не являются частями слов/дат (упрощенно)
+        # Улучшенное regex для обработки чисел
+        text = re.sub(r'(?<![a-zа-яё])\d+(?![a-zа-яё])', replace_num, text)
+
+        # 4. Обработка пунктуации (КРИТИЧЕСКАЯ ЧАСТЬ для соответствия токенам)
+
+        # Стандартизация многоточия в ' ... '
+        text = self._re_ellipsis_1.sub(' ... ', text)
+        text = self._re_ellipsis_2.sub(' ... ', text)
+        text = self._re_ellipsis_3.sub(' ... ', text)
+        
+        # Стандартизация тире/дефисов в ' - '
+        text = self._ru_re_dashes.sub(' - ', text)
+
+        # Удаление избыточных знаков препинания (!!! -> !, ??? -> ?)
+        text = self._re_multi_punct.sub(r'\1', text)
+        
+        # Обработка широких символов (из ru_char_rep_map)
+        text = self._ru_cleanup_pattern.sub(lambda x: self.ru_char_rep_map[x.group()], text)
+
+        # Обеспечиваем один пробел перед критической пунктуацией (.,?!:;).
+        # Это преобразует 'слово.' в 'слово .' и позволяет токенизатору увидеть ' .'
+        text = self._ru_re_punctuation_spacing.sub(r' \1', text)
+
+        # Финальная очистка лишних пробелов
+        text = re.sub(r"\s+", " ", text).strip()
+        
+        return text.strip()
+
     def normalize(self, text: str, language: str | None = None) -> str:
         if text is None:
             return ""
@@ -162,6 +283,8 @@ class TextNormalizer:
         if lang is None:
             if self.is_japanese(text):
                 lang = "ja"
+            elif self.is_russian(text): # НОВОЕ: Проверяем кириллицу
+                lang = "ru"
             elif self.use_chinese(text):
                 lang = "zh"
             else:
@@ -169,6 +292,9 @@ class TextNormalizer:
 
         if lang == "ja":
             return self.normalize_japanese(text)
+        
+        if lang == "ru":
+            return self.normalize_russian(text)
 
         if lang == "zh":
             self._ensure_normalizers()
@@ -375,9 +501,13 @@ class TextTokenizer:
             return []
         if len(text.strip()) == 1:
             return self.sp_model.Encode(text, out_type=kwargs.pop("out_type", int), **kwargs)
+        
         # 预处理
         if self.normalizer:
             text = self.normalizer.normalize(text, language=language)
+        
+        text = text.upper()
+
         if len(self.pre_tokenizers) > 0:
             for pre_tokenizer in self.pre_tokenizers:
                 text = pre_tokenizer(text)
@@ -418,30 +548,30 @@ class TextTokenizer:
             token = tokenized_str[i]
             current_segment.append(token)
             current_segment_tokens_len += 1
-            if not  ("," in split_tokens or "▁," in split_tokens ) and ("," in current_segment or "▁," in current_segment): 
-                # 如果当前tokens中有,，则按,分割
+            if not  ("," in split_tokens or " ," in split_tokens ) and ("," in current_segment or " ," in current_segment): 
+                # Если в текущих токенах есть запятая, но она не является токеном-разделителем, разделяем по ней
                 sub_segments = TextTokenizer.split_segments_by_token(
-                    current_segment, [",", "▁,"], max_text_tokens_per_segment=max_text_tokens_per_segment, quick_streaming_tokens = quick_streaming_tokens
+                    current_segment, [",", " ,"], max_text_tokens_per_segment=max_text_tokens_per_segment, quick_streaming_tokens = quick_streaming_tokens
                 )
             elif "-" not in split_tokens and "-" in current_segment:
-                # 没有,，则按-分割
+                # Нет запятой, разделяем по дефису
                 sub_segments = TextTokenizer.split_segments_by_token(
                     current_segment, ["-"], max_text_tokens_per_segment=max_text_tokens_per_segment, quick_streaming_tokens = quick_streaming_tokens
                 )
             elif current_segment_tokens_len <= max_text_tokens_per_segment:
                 if token in split_tokens and current_segment_tokens_len > 2:
                     if i < len(tokenized_str) - 1:
-                        if tokenized_str[i + 1] in ["'", "▁'"]:
-                            # 后续token是'，则不切分
+                        if tokenized_str[i + 1] in ["'", " '"]:
+                            # Если следующий токен - кавычка, не разделяем
                             current_segment.append(tokenized_str[i + 1])
                             i += 1
                     segments.append(current_segment)
                     current_segment = []
                     current_segment_tokens_len = 0
                 continue
-            # 如果当前tokens的长度超过最大限制
+            # Если текущие токены превышают максимальную длину
             else:
-                # 按照长度分割
+                # Разделяем по длине
                 sub_segments = []
                 for j in range(0, len(current_segment), max_text_tokens_per_segment):
                     if j + max_text_tokens_per_segment < len(current_segment):
@@ -460,7 +590,7 @@ class TextTokenizer:
         if current_segment_tokens_len > 0:
             assert current_segment_tokens_len <= max_text_tokens_per_segment
             segments.append(current_segment)
-        # 如果相邻的句子加起来长度小于最大限制，且此前token总数超过quick_streaming_tokens，则合并
+        # Если соседние предложения вместе короче лимита и общее число токенов превысило quick_streaming_tokens, объединяем
         merged_segments = []
         total_token = 0
         for segment in segments:
@@ -471,7 +601,7 @@ class TextTokenizer:
                 merged_segments.append(segment)
             elif len(merged_segments[-1]) + len(segment) <= max_text_tokens_per_segment and total_token > quick_streaming_tokens:
                 merged_segments[-1] = merged_segments[-1] + segment
-            # 或小于最大长度限制的一半，则合并
+            # Или если меньше половины максимальной длины, объединяем
             elif len(merged_segments[-1]) + len(segment) <= max_text_tokens_per_segment / 2:
                 merged_segments[-1] = merged_segments[-1] + segment
             else:
@@ -482,10 +612,10 @@ class TextTokenizer:
         ".",
         "!",
         "?",
-        "▁.",
-        # "▁!", # unk
-        "▁?",
-        "▁...", # ellipsis
+        " .",
+        # " !", # unk
+        " ?",
+        " ...", # ellipsis
     ]
     def split_segments(self, tokenized: List[str], max_text_tokens_per_segment=120, quick_streaming_tokens = 0) -> List[List[str]]:
         return TextTokenizer.split_segments_by_token(
@@ -494,7 +624,7 @@ class TextTokenizer:
 
 
 if __name__ == "__main__":
-    # 测试程序
+    # Тестовый код
 
     text_normalizer = TextNormalizer()
 
@@ -537,17 +667,22 @@ if __name__ == "__main__":
         "which's the best?",  # which is the best?
         "how's it going?",  # how is it going?
         "今天是个好日子 it's a good day",  # 今天是个好日子 it is a good day
-        # 人名
-        "约瑟夫·高登-莱维特（Joseph Gordon-Levitt is an American actor）",
-        "蒂莫西·唐纳德·库克（英文名：Timothy Donald Cook），通称蒂姆·库克（Tim Cook），美国商业经理、工业工程师和工业开发商，现任苹果公司首席执行官。",
-        # 长句子
-        "《盗梦空间》是由美国华纳兄弟影片公司出品的电影，由克里斯托弗·诺兰执导并编剧，莱昂纳多·迪卡普里奥、玛丽昂·歌迪亚、约瑟夫·高登-莱维特、艾利奥特·佩吉、汤姆·哈迪等联袂主演，2010年7月16日在美国上映，2010年9月1日在中国内地上映，2020年8月28日在中国内地重映。影片剧情游走于梦境与现实之间，被定义为“发生在意识结构内的当代动作科幻片”，讲述了由莱昂纳多·迪卡普里奥扮演的造梦师，带领特工团队进入他人梦境，从他人的潜意识中盗取机密，并重塑他人梦境的故事。",
-        "清晨拉开窗帘，阳光洒在窗台的Bloomixy花艺礼盒上——薰衣草香薰蜡烛唤醒嗅觉，永生花束折射出晨露般光泽。设计师将“自然绽放美学”融入每个细节：手工陶瓷花瓶可作首饰收纳，香薰精油含依兰依兰舒缓配方。限量款附赠《365天插花灵感手册》，让每个平凡日子都有花开仪式感。\n宴会厅灯光暗下的刹那，Glimmeria星月系列耳坠开始发光——瑞士冷珐琅工艺让蓝宝石如银河流动，钛合金骨架仅3.2g无负重感。设计师秘密：内置微型重力感应器，随步伐产生0.01mm振幅，打造“行走的星光”。七夕限定礼盒含星座定制铭牌，让爱意如星辰永恒闪耀。",
-        "电影1：“黑暗骑士”（演员：克里斯蒂安·贝尔、希斯·莱杰；导演：克里斯托弗·诺兰）；电影2：“盗梦空间”（演员：莱昂纳多·迪卡普里奥；导演：克里斯托弗·诺兰）；电影3：“钢琴家”（演员：艾德里安·布洛迪；导演：罗曼·波兰斯基）；电影4：“泰坦尼克号”（演员：莱昂纳多·迪卡普里奥；导演：詹姆斯·卡梅隆）；电影5：“阿凡达”（演员：萨姆·沃辛顿；导演：詹姆斯·卡梅隆）；电影6：“南方公园：大电影”（演员：马特·斯通、托马斯·艾恩格瑞；导演：特雷·帕克）",
+        # Русские примеры с улучшенной нормализацией
+        "Привет, это IndexTTS, версия 1.0! Я стою 1024 руб.",
+        "Это произошло 20.09.2025 г. на ул. Ленина, д. 5.",
+        "Скорость была 50 км/ч, а цена 300 тыс. рублей (или 450€).",
+        "Она сказала: 'Спасибо!!!' и пошла домой.",
+        "Это — очень сложно. Почему? Потому что это так...",
+        "Я люблю математику: $E=mc^2$ и $x^3+y^2=10$.",
+        "Текст с разными символами: #хештег@почта&ко.",
+        "Наша цель: 15.5 млн. метров в час. Дата 12.12.2012.",
+        "Символы ^ и = тоже должны быть обработаны: 2^3=8.",
+        "Очень много пробелов , и пунктуации . ",
+        "Что вершит судьбу человечества в этом мире? Некое незримое существо или закон, подобно Длани Господней парящей над миром? По крайне мере истинно то, что человек не властен даже над своей волей"
     ]
-    # 测试分词器
+    # Тест токенизатора
     tokenizer = TextTokenizer(
-        vocab_file="checkpoints/bpe.model",
+        vocab_file="checkpoints/extended_bpe.model",
         normalizer=text_normalizer,
     )
 
@@ -561,7 +696,7 @@ if __name__ == "__main__":
     print(f"bos_token: {tokenizer.bos_token}, bos_token_id: {tokenizer.bos_token_id}")
     print(f"eos_token: {tokenizer.eos_token}, eos_token_id: {tokenizer.eos_token_id}")
     print(f"unk_token: {tokenizer.unk_token}, unk_token_id: {tokenizer.unk_token_id}")
-    # 测试拼音 (8474-10201)
+    # Тест пиньинь (8474-10201)
     for id in range(8474, 10201):
         pinyin = tokenizer.convert_ids_to_tokens(id)
         if re.match(TextNormalizer.PINYIN_TONE_PATTERN, pinyin, re.IGNORECASE) is None:
@@ -571,22 +706,23 @@ if __name__ == "__main__":
     ]:
         if re.match(TextNormalizer.PINYIN_TONE_PATTERN, badcase, re.IGNORECASE) is not None:
             print(f"{badcase} should not be matched!")
-    # 不应该有 unk_token_id
-    for t in set([*TextTokenizer.punctuation_marks_tokens, ",", "▁,", "-", "▁..."]):
+    # Не должно быть unk_token_id
+    for t in set([*TextTokenizer.punctuation_marks_tokens, ",", " ,", "-", " ..."]):
         tokens = tokenizer.convert_tokens_to_ids(t)
         if tokenizer.unk_token_id in tokens:
             print(f"Warning: {t} is unknown token")
         print(f"`{t}`", "->", tokens, "->", tokenizer.convert_ids_to_tokens(tokens))
     for ch in set(tokenizer.normalizer.zh_char_rep_map.values()):
-        # 测试 normalize后的字符能被分词器识别
+        # Тест: символы после нормализации должны быть распознаны токенизатором
         print(f"`{ch}`", "->", tokenizer.sp_model.Encode(ch, out_type=str))
         print(f"` {ch}`", "->", tokenizer.sp_model.Encode(f" {ch}", out_type=str))
     max_text_tokens_per_segment=120
     for i in range(len(cases)):
-        print(f"原始文本: {cases[i]}")
-        print(f"Normalized: {text_normalizer.normalize(cases[i])}")
+        print(f"Исходный текст: {cases[i]}")
+        normalized = text_normalizer.normalize(cases[i])
+        print(f"Normalized: {normalized}")
         tokens = tokenizer.tokenize(cases[i])
-        print("Tokenzied: ", ", ".join([f"`{t}`" for t in tokens]))
+        print("Tokenized: ", ", ".join([f"`{t}`" for t in tokens]))
         segments = tokenizer.split_segments(tokens, max_text_tokens_per_segment=max_text_tokens_per_segment)
         print("Segments count:", len(segments))
         if len(segments) > 1:
