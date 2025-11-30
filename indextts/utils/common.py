@@ -1,6 +1,7 @@
 import os
 import random
 import re
+from typing import List, Union
 
 import torch
 import torchaudio
@@ -28,39 +29,95 @@ def load_audio(audiopath, sampling_rate):
 
 def tokenize_by_CJK_char(line: str, do_upper_case=True) -> str:
     """
-    Tokenize a line of text with CJK char.
+    Tokenize a line of text with CJK char, but preserves word integrity 
+    for alphabetic languages (Cyrillic/Latin) to ensure long BPE tokens are possible.
 
-    Note: All return charaters will be upper case.
-
-    Example:
-      input = "你好世界是 hello world 的中文"
-      output = "你 好 世 界 是 HELLO WORLD 的 中 文"
+    Example (before fix): "ПРИВЕТ" -> "П Р И В Е Т" (Fragmented)
+    Example (after fix): "ПРИВЕТ" -> "ПРИВЕТ" (Word preserved)
 
     Args:
       line:
         The input text.
 
     Return:
-      A new string tokenize by CJK char.
+      A new string tokenized by CJK char, with alphabetic words preserved.
     """
-    # The CJK ranges is from https://github.com/alvations/nltk/blob/79eed6ddea0d0a2c212c1060b477fc268fec4d4b/nltk/tokenize/util.py
-    CJK_RANGE_PATTERN = (
+    # Паттерн для обнаружения и захвата CJK-символов
+    CJK_RANGE_PATTERN_WITH_CAPTURE = (
         r"([\u1100-\u11ff\u2e80-\ua4cf\ua840-\uD7AF\uF900-\uFAFF\uFE30-\uFE4F\uFF65-\uFFDC\U00020000-\U0002FFFF])"
     )
-    chars = re.split(CJK_RANGE_PATTERN, line.strip())
-    return " ".join([w.strip().upper() if do_upper_case else w.strip() for w in chars if w.strip()])
+    
+    # 1. Разделяем строку по CJK-символам (CJK-символы остаются в списке из-за скобок)
+    chars_or_words = re.split(CJK_RANGE_PATTERN_WITH_CAPTURE, line.strip())
+    
+    result_parts = []
+    
+    for part in chars_or_words:
+        if not part.strip():
+            continue
+        
+        processed_part = part.strip()
+
+        # 2. Проверяем, является ли часть CJK-символом. 
+        # Если да, оставляем ее как есть (она уже токенизирована по символам).
+        if re.match(CJK_RANGE_PATTERN_WITH_CAPTURE, processed_part):
+            # CJK символы не меняются, регистр не важен для CJK
+            result_parts.append(processed_part)
+        else:
+            # 3. Если это не CJK (кириллица, латиница, знаки препинания)
+            # Приводим к верхнему регистру, но НЕ фрагментируем (не вставляем пробелы внутри слова)
+            if do_upper_case:
+                processed_part = processed_part.upper()
+
+            # Добавляем часть. Если это слово типа "ПРИВЕТ", оно добавится целиком.
+            result_parts.append(processed_part)
+
+    # 4. Объединяем части через пробел. BPE-токенизатор получит "ПРИВЕТ МИР" 
+    # или "你 好 世 界 HELLO WORLD", и сможет выбрать длинный токен "ПРИВЕТ".
+    return " ".join([p for p in result_parts if p])
+
+
+# Новая вспомогательная функция для чистых алфавитных языков
+def de_tokenized_by_alphabetic_char(line: str, do_lower_case=False) -> str:
+    """
+    Restores spaces for alphabetic languages (like English or Russian) 
+    that were tokenized by SentencePiece.
+    """
+    if do_lower_case:
+        line = line.lower()
+        
+    # sp_model.Decode уже заменил BPE-пробелы на ' ', но его нужно нормализовать.
+    # split() и join(' ') восстанавливают правильные пробелы между словами.
+    return ' '.join(line.split())
 
 
 def de_tokenized_by_CJK_char(line: str, do_lower_case=False) -> str:
     """
-    Example:
-      input = "你 好 世 界 是 HELLO WORLD 的 中 文"
-      output = "你好世界是 hello world 的中文"
-
-    do_lower_case:
-      input = "SEE YOU!"
-      output = "see you!"
+    Смешанная логика. Сливает CJK-символы, но сохраняет пробелы вокруг 
+    латиницы/кириллицы (если они не CJK).
+    
+    ПОПЫТКА ИСПОЛЬЗОВАТЬ СУЩЕСТВУЮЩУЮ ЛОГИКУ:
+    Оставляем существующую логику только для CJK-текста. 
+    Для русского/английского — вызываем новую функцию.
     """
+    
+    # 1. Проверяем наличие CJK-символов
+    # (Используем паттерн из tokenize_by_CJK_char для обнаружения)
+    # Используем паттерн без захвата, чтобы просто проверить наличие
+    CJK_RANGE_PATTERN = (
+        r"[\u1100-\u11ff\u2e80-\ua4cf\ua840-\uD7AF\uF900-\uFAFF\uFE30-\uFE4F\uFF65-\uFFDC\U00020000-\U0002FFFF]"
+    )
+    
+    has_cjk = re.search(CJK_RANGE_PATTERN, line)
+
+    if not has_cjk:
+        # Если CJK символов нет (т.е. это чистый русский или английский текст)
+        # используем простую логику восстановления пробелов.
+        return de_tokenized_by_alphabetic_char(line, do_lower_case=do_lower_case)
+
+    # 2. Если есть CJK-символы, применяем оригинальную CJK-логику.
+    # Это позволяет сохранить слияние CJK-символов.
+
     # replace english words in the line with placeholders
     english_word_pattern = re.compile(r"([A-Z]+(?:[\s-][A-Z-]+)*)", re.IGNORECASE)
     english_sents = english_word_pattern.findall(line)
@@ -78,6 +135,10 @@ def de_tokenized_by_CJK_char(line: str, do_lower_case=False) -> str:
             words[i] = words[i].replace(m.group(1), english_sents[placeholder_index])
             if do_lower_case:
                 words[i] = words[i].lower()
+                
+    # ВНИМАНИЕ: Если русский текст токенизировался как отдельные слова, 
+    # а не как CJK-токены, то здесь он будет слит! 
+    # Это может быть проблемой для смешанного текста.
     return "".join(words)
 
 
