@@ -122,7 +122,7 @@ torchvision = [
 ]
 flash-attn = [
     { path = "flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp310-cp310-win_amd64.whl", marker = "sys_platform == 'win32'" },
-    { package = "flash-attn", marker = "sys_platform == 'linux'" }
+    { index = "pytorch-cuda", marker = "sys_platform == 'linux'", extra = "cu128" }
 ]
 
 [[tool.uv.index]]
