@@ -119,10 +119,7 @@ torchvision = [
 ]
 flash-attn = [
     { version = "^2.8.3", marker = "sys_platform == 'linux'" },
-    { 
-        path = "flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp310-cp310-win_amd64.whl", 
-        marker = "sys_platform == 'win32'" 
-    },
+    { path = "flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp310-cp310-win_amd64.whl", marker = "sys_platform == 'win32'" },
 ]
 
 
