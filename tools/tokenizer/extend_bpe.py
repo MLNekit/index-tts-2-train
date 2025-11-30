@@ -108,13 +108,13 @@ def collect_corpus(manifests: Iterable[Path]) -> tuple[Path, int]:
             for manifest in manifests:
                 with manifest.open("r", encoding="utf-8") as handle:
                     for line in handle:
-                        if not line.strip():
-                            continue
+                        # ... (пропуск)
                         record = json.loads(line)
                         text = record.get("text", "")
                         text = text.strip()
                         if not text:
                             continue
+                        text = text.upper()
                         tmp.write(text + "\n")
                         total += 1
     except Exception:
@@ -148,6 +148,7 @@ def train_candidate_tokenizer(
             eos_id=1,
             unk_id=2,
             pad_id=-1,
+            normalization_rule_name='nfkc'
         )
         candidate_model_path = prefix.with_suffix(".model")
         proto = sp_model.ModelProto()
@@ -199,6 +200,23 @@ def append_tokens(
             continue
         piece = candidate_lookup.get(ch)
         if piece is None:
+            continue
+        add_piece(piece)
+        if len(appended) >= needed:
+            break
+
+    CYRILLIC_LOWER = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
+    # Все прописные кириллические символы (русский)
+    CYRILLIC_UPPER = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
+
+    for ch in CYRILLIC_LOWER + CYRILLIC_UPPER:
+        if ch in existing_texts:
+            continue
+        piece = candidate_lookup.get(ch)
+        if piece is None:
+            # Если символа нет даже во временной модели, это проблема!
+            # Но мы все равно попробуем его добавить, чтобы убедиться.
+            # В идеале нужно, чтобы candidate_proto их содержал.
             continue
         add_piece(piece)
         if len(appended) >= needed:
