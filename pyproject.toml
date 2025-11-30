@@ -122,8 +122,9 @@ torchvision = [
   { index = "pytorch-cuda", marker = "sys_platform == 'linux' or sys_platform == 'win32'", extra = "cu128" },
 ]
 flash-attn = [
-    { path = "flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp310-cp310-win_amd64.whl", marker = "sys_platform == 'win32'" },
-    { index = "pytorch-cuda", marker = "sys_platform == 'linux'", extra = "cu128" }
+    { index = "pytorch-cuda", marker = "sys_platform == 'linux'", extra = "cu128" },
+    { path = "flash_attn-2.8.3+cu128torch2.8.0cxx11abiFALSE-cp310-cp310-win_amd64.whl", marker = "sys_platform == 'win32'" }
+    
 ]
 
 [[tool.uv.index]]
