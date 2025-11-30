@@ -1,5 +1,5 @@
 dataset:
-    bpe_model: bpe.model
+    bpe_model: extended_bpe.model
     sample_rate: 24000
     squeeze: false
     mel:
