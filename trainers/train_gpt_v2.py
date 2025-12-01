@@ -805,7 +805,7 @@ def main() -> None:
                         },
                         output_dir / "latest.pth",
                     )
-                    while len(recent_checkpoints) > 3:
+                    while len(recent_checkpoints) > 1:
                         obsolete = recent_checkpoints.pop(0)
                         try:
                             os.remove(obsolete)
@@ -869,7 +869,7 @@ def main() -> None:
             },
             output_dir / "latest.pth",
         )
-        while len(recent_checkpoints) > 3:
+        while len(recent_checkpoints) > 1:
             obsolete = recent_checkpoints.pop(0)
             try:
                 os.remove(obsolete)
